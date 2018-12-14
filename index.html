@@ -1,0 +1,272 @@
+<html>
+<head>
+<script src="mermaid.js"></script>
+<script src="js-yaml.min.js"></script>
+<style>
+body{
+  background-color: #ddf;
+}
+#layout{
+  width:100%;
+  height:80%;
+}
+#layout td{
+  width: 50%;
+}
+#area{
+  width: 100%;
+  height: 100%;
+  background-color: #333;
+  color: white;
+}
+
+h2{
+  margin:0px;
+}
+</style>
+</head>
+<body>
+  <h1>Kubernetes Pod Manifest Visualizer</h1>
+  <table id="layout">
+  <td>
+  <textarea id="area">
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-lamp-site
+spec:
+    containers:
+    - name: mysql
+      image: mysql
+      env:
+      - name: MYSQL_ROOT_PASSWORD
+        value: "rootpasswd"
+      volumeMounts:
+      - mountPath: /var/lib/mysql
+        name: site-data
+        subPath: mysql
+    - name: php
+      image: php:7.0-apache
+      volumeMounts:
+      - mountPath: /var/www/html
+        name: site-data
+        subPath: html
+    volumes:
+    - name: site-data
+      persistentVolumeClaim:
+        claimName: my-lamp-site-data
+
+  </textarea>
+  </td>
+  <td>
+  <div id="graph">test</div>
+  </td>
+  </table>
+  <hr>
+  made by <a href="http://twitter.com/ina_ani">@ina_ani</a>
+
+  <script>
+mermaid.initialize({startOnLoad: true, theme: 'neutral'});
+
+function escape(s){
+  var result = "";
+  for (var i=0; i<s.length; i++) {
+    if(s[i] == "[" || s[i] == "]"){
+      result = result + "#" + s.charCodeAt(i) + ";";
+    }else{
+      result += s[i];
+    }
+  }
+  return result;
+}
+
+function redraw(){
+  var str = area.value;
+  console.log(str);
+  var doc = jsyaml.load(str)
+  console.log(doc);
+
+  var kind = doc.kind;
+  var name = doc.metadata.name;
+  var initContainers = [];
+  var containers = [];
+  var volumes = [];
+  console.log(kind + "/" + name);
+
+  if(kind == "Deployment" || kind == "StatefulSet" || kind == "ReplicaSet" || kind=="ReplicationController"){
+    doc = doc.spec.template;
+  }
+
+  if(doc.spec.initContainers){
+    doc.spec.initContainers.forEach(function(o){
+      var name = o.name
+      var image = o.image
+      console.log("initContainers", name, image);
+    });
+    initContainers = doc.spec.initContainers
+  }
+  if(doc.spec.containers){
+    doc.spec.containers.forEach(function(o){
+      var name = o.name
+      var image = o.image
+      console.log("containers", name, image);
+    });
+    containers = doc.spec.containers
+  }
+  if(doc.spec.volumes){
+    doc.spec.volumes.forEach(function(o){
+      var name = o.name
+      console.log("volumes", name)
+    })
+    volumes = doc.spec.volumes
+  }
+
+
+  var strList = ["graph LR"];
+  strList.push("subgraph Pod " + doc.metadata.name)
+  var label = [];
+  if(doc.metadata.labels){
+    var count = 0;
+    for(var l in doc.metadata.labels){
+      strList.push(doc.metadata.name +"-label-"+ count + ">" + l + "=" + doc.metadata.labels[l] + "]");
+      count ++;
+    }
+  }
+
+  if(initContainers.length > 0){
+    strList.push("subgraph initContainers");
+    initContainers.forEach(function(c){
+      var cont = [];
+      cont.push("<h2>"+c.name+"</h2>");
+      for(var k in c){
+        if(k == "env"){
+          c[k].forEach(function(e){
+            if(e.value){
+              cont.push("env: " + e.name + "=" + e.value);
+            }
+            if(e.valueFrom){
+              cont.push("env: " + e.name + "="+ escape(JSON.stringify(e.valueFrom).replace(/"/g,"")));
+            }
+          });
+        }else if(k == "name"){
+        }else if(Array.isArray(c[k])){
+          c[k].forEach(function(v){
+            cont.push(k + ":" + JSON.stringify(v).replace(/"/g,""));
+          });
+        }else{
+          cont.push(k + ":" + JSON.stringify(c[k]).replace(/"/g,""))
+        }
+      }
+      strList.push(c.name+'["'+cont.join("<br>")+'"]');
+
+    })
+    strList.push("end");
+  }
+  if(containers.length > 0){
+    strList.push("subgraph containers");
+    containers.forEach(function(c){
+      var cont = [];
+      cont.push("<h2>"+c.name+"</h2>");
+      for(var k in c){
+        if(k == "env"){
+          c[k].forEach(function(e){
+            if(e.value){
+              cont.push("env: " + e.name + "=" + e.value);
+            }
+            if(e.valueFrom){
+              cont.push("env: " + e.name + "="+ escape(JSON.stringify(e.valueFrom).replace(/"/g,"")));
+            }
+          });
+        }else if(k == "name"){
+        }else if(Array.isArray(c[k])){
+          c[k].forEach(function(v){
+            cont.push(k + ":" + JSON.stringify(v).replace(/"/g,""));
+          });
+        }else{
+          cont.push(k + ":" + JSON.stringify(c[k]).replace(/"/g,""))
+        }
+      }
+      strList.push(c.name+'["'+cont.join("<br>")+'"]');
+    })
+    strList.push("end");
+  }
+  if(volumes.length > 0){
+    strList.push("subgraph volumes");
+    volumes.forEach(function(v){
+      var t = "";
+      for(var k in v){
+        if(k != "name"){
+          t = k;
+        }
+      }
+      if(t == "configMap"){
+        t += ":"+ v.configMap.name
+      }
+      if(t == "secret"){
+        t += ":"+ v.secret.secretName
+      }
+      var cont = [];
+
+      cont.push("<h2>"+v.name+"</h2>");
+      for(var k in v){
+        if(Array.isArray(v[k])){
+          v[k].forEach(function(v){
+            cont.push(k + ":" + JSON.stringify(v).replace(/"/g,""));
+          });
+        }else if(k == "name"){
+        }else{
+          cont.push(k + ":" + JSON.stringify(v[k]).replace(/"/g,""))
+        }
+
+      }
+      strList.push(v.name + '["' + cont.join("<br>")+ '"]')
+    })
+    strList.push("end");
+  }
+
+  if(initContainers.length > 0){
+    initContainers.forEach(function(c){
+      if(c.volumeMounts){
+        c.volumeMounts.forEach(function(v){
+          strList.push(c.name+"-->"+v.name);
+        });
+      }
+    })
+  }
+  if(containers.length > 0){
+    containers.forEach(function(c){
+      if(c.volumeMounts){
+        c.volumeMounts.forEach(function(v){
+          var text = v.mountPath;
+          if(v.readOnly){text += "(ro)"}
+          if(v.subPath){text += "<br>(subpath:"+v.subPath+")"}
+          strList.push(c.name + "-->|\"" + text +"\"|"+v.name);
+        });
+      }
+    })
+  }
+
+ strList.push("end")
+
+  var str = strList.join("\n");
+  console.log(str)
+
+  var elm = document.createElement("div");
+  elm.innerHTML = str;
+  var graph = document.getElementById("graph");
+  graph.innerHTML = "";
+  graph.appendChild(elm);
+  mermaid.init(undefined, elm,function(){})
+
+}
+
+var area = document.getElementById("area");
+area.addEventListener("input", function(){
+  redraw();
+});
+
+redraw();
+
+  </script>
+</body>
+</html>
